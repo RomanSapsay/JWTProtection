@@ -1,59 +1,63 @@
-from flask_smorest import Blueprint
 from flask.views import MethodView
-from flask import abort
+from flask_smorest import Blueprint, abort
+from flask_jwt_extended import jwt_required
 from sqlalchemy.exc import SQLAlchemyError
+
+from db import db
 from models import ItemModel
 from schemas import ItemSchema, ItemUpdateSchema
-from db import db
 
-blp = Blueprint("items", "items", url_prefix="/items")
+blp = Blueprint("Items", __name__, description="Operations on items")
 
-@blp.route("/<string:item_id>")
+@blp.route("/item/<string:item_id>")
 class Item(MethodView):
+    @jwt_required()
     @blp.response(200, ItemSchema)
     def get(self, item_id):
+        """Отримати елемент за ID"""
+        # Пошук елемента за ID в базі даних
         item = ItemModel.query.get_or_404(item_id)
         return item
 
+    @jwt_required()
     def delete(self, item_id):
         item = ItemModel.query.get_or_404(item_id)
-        try:
-            db.session.delete(item)
-            db.session.commit()
-        except SQLAlchemyError:
-            abort(500, message="An error occurred while deleting the item.")
+        db.session.delete(item)
+        db.session.commit()
         return {"message": "Item deleted."}
 
     @blp.arguments(ItemUpdateSchema)
     @blp.response(200, ItemSchema)
     def put(self, item_data, item_id):
-        item = ItemModel.query.get(item_id)
-        if item:
-            item.name = item_data.get("name", item.name)
-            item.price = item_data.get("price", item.price)
-        else:
-            item = ItemModel(id=item_id, **item_data)
+        item = ItemModel.query.get_or_404(item_id)
 
-        try:
+        if item:
+            item.price = item_data["price"]
+            item.name = item_data["name"]
+            db.session.commit()
+            return {"message": "Item was updated!", "item": item}
+        else:
+            item = ItemModel(**item_data)
             db.session.add(item)
             db.session.commit()
-        except SQLAlchemyError:
-            abort(500, message="An error occurred while updating the item.")
-        return item
+            return {"message": "Item was created!", "item": item}
 
-@blp.route("/")
+@blp.route("/item")
 class ItemList(MethodView):
+    @jwt_required()
     @blp.response(200, ItemSchema(many=True))
     def get(self):
         return ItemModel.query.all()
 
+    @jwt_required()
     @blp.arguments(ItemSchema)
     @blp.response(201, ItemSchema)
     def post(self, item_data):
         item = ItemModel(**item_data)
+
         try:
             db.session.add(item)
             db.session.commit()
+            return {"message": "New item was created!", "item": item}
         except SQLAlchemyError:
             abort(500, message="An error occurred while inserting the item.")
-        return item
